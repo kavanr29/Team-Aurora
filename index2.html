@@ -1,0 +1,818 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>HealthAI Dashboard </title>
+
+  <!-- Tailwind for quick styling -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <style>
+    :root{
+      --primary:#0d9488;
+      --accent:#134e4a;
+      --bg:#eef8f7;
+      --card-bg:#f6fffd;
+      --muted:#475569;
+    }
+    body { background: var(--bg); color: #0f172a; font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial; }
+    .card { background: var(--card-bg); }
+    .modal-backdrop { background: rgba(2,6,23,0.45); }
+    .patient-item { transition: transform .12s ease, box-shadow .12s ease; }
+    .patient-item:hover { transform: translateY(-3px); box-shadow: 0 6px 20px rgba(2,6,23,0.06); }
+    #vitalsCanvas { width:100% !important; height:240px !important; }
+    .toast { position: fixed; right: 20px; bottom: 20px; z-index: 10000; background: #0f172a; color: #fff; padding: 12px 16px; border-radius: 8px; box-shadow: 0 6px 24px rgba(2,6,23,.2); }
+    .msg-bubble { padding:8px 12px; border-radius:12px; display:inline-block; max-width:85%; }
+    .msg-doctor { background: #ecfeff; color: #064e3b; border:1px solid rgba(6,78,59,.08); }
+    .msg-patient { background: #f1f5f9; color: #0f172a; }
+    .doctor-pill { background: linear-gradient(90deg,var(--primary),#0f766e); color:white; padding:6px 10px; border-radius:999px; font-weight:600; font-size:12px; }
+  </style>
+</head>
+<body class="antialiased">
+
+<div class="min-h-screen">
+  <header class="shadow-sm">
+    <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="text-2xl font-bold" style="color:var(--accent)">HealthAI Dashboard</div>
+        <div class="text-sm text-slate-600">Demo — Final Fixes</div>
+      </div>
+      <div class="flex items-center gap-3">
+        <button id="openPortalBtn" class="px-3 py-1 rounded border">Patient Portal</button>
+        <button id="doctorLoginBtn" class="px-3 py-1 rounded bg-white border">Doctor Login</button>
+        <button id="doctorsTabBtn" class="px-3 py-1 rounded border">Doctors</button>
+        <div class="text-sm text-slate-600">Role: <span id="roleLabel" class="font-semibold">Guest</span></div>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 py-6 grid grid-cols-1 lg:grid-cols-4 gap-6">
+    <aside class="lg:col-span-1 card rounded shadow-sm p-3">
+      <div class="flex items-center gap-2 mb-3">
+        <input id="searchInput" placeholder="Search patient or ID" class="flex-1 p-2 border rounded" />
+        <button id="clearSearch" class="px-2 py-1 rounded bg-slate-100">Clear</button>
+      </div>
+      <div class="flex justify-between items-center mb-2">
+        <div class="text-sm text-slate-600">Patients (<span id="patientCount">0</span>)</div>
+        <div class="flex gap-2">
+          <button id="openAddBtn" class="px-3 py-1 bg-[color:var(--primary)] text-white rounded">+ Add</button>
+          <button id="resetBtn" class="px-3 py-1 rounded border">Reset</button>
+        </div>
+      </div>
+      <div id="patientsList" class="space-y-2 max-h-[60vh] overflow-auto"></div>
+    </aside>
+
+    <section class="lg:col-span-2 card rounded shadow-sm p-4 space-y-4">
+      <div class="flex items-start justify-between">
+        <div>
+          <h2 id="selName" class="text-xl font-bold">Select a patient</h2>
+          <div id="selMeta" class="text-sm text-slate-600"></div>
+        </div>
+        <div class="text-sm text-right">
+          <div>Doctor: <span id="selDoctor" class="doctor-pill">Unassigned</span></div>
+        </div>
+      </div>
+
+      <div class="flex justify-end gap-2">
+        <button id="generateReportBtn" class="px-3 py-1 rounded border">Generate Report</button>
+        <button id="sendMsgBtn" class="px-3 py-1 rounded bg-[color:var(--primary)] text-white">Send Message</button>
+        <button id="openTeleBtn" class="px-3 py-1 rounded bg-[color:var(--primary)] text-white">Open Telemedicine</button>
+        <button id="openAIChatBtn" class="px-3 py-1 rounded bg-slate-100">AI Chat</button>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="p-3 border rounded">
+          <h4 class="font-semibold mb-2">Vitals Trend</h4>
+          <canvas id="vitalsCanvas"></canvas>
+        </div>
+
+        <div class="p-3 border rounded">
+          <h4 class="font-semibold mb-2">Quick Snapshot</h4>
+          <div class="text-sm space-y-1">
+            <div>Latest HR: <span id="selHR" class="font-semibold">-</span></div>
+            <div>Latest BP: <span id="selBP" class="font-semibold">-</span></div>
+            <div>Latest SpO₂: <span id="selSpO2" class="font-semibold">-</span></div>
+            <div>Notes: <span id="selNotes" class="text-slate-700">-</span></div>
+            <div class="mt-2 text-xs text-slate-500">Labs: <span id="selLabs">-</span></div>
+            <div class="mt-3"><div class="text-xs text-slate-500">Recent Messages</div><div id="recentMessages" class="mt-2 space-y-2"></div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="border rounded">
+        <div class="p-3 space-y-2">
+          <div class="flex items-center justify-between">
+            <h4 class="font-semibold">AI Co-pilot Summary</h4>
+            <button id="genAISummary" class="px-3 py-1 rounded bg-[color:var(--primary)] text-white">Generate</button>
+          </div>
+          <div id="aiSummaryText" class="bg-white p-3 rounded shadow-sm min-h-[72px] text-sm text-slate-700"><em class="text-slate-400">No summary generated yet.</em></div>
+        </div>
+      </div>
+
+      <div class="border rounded">
+        <div class="p-3 space-y-2">
+          <div class="flex items-center justify-between">
+            <h4 class="font-semibold">SOAP Note</h4>
+            <button id="autofillSOAP" class="px-3 py-1 rounded bg-emerald-600 text-white">Auto-fill</button>
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+            <textarea id="soapS" class="p-2 border rounded h-24" placeholder="Subjective (S)"></textarea>
+            <textarea id="soapO" class="p-2 border rounded h-24" placeholder="Objective (O)"></textarea>
+            <textarea id="soapA" class="p-2 border rounded h-24" placeholder="Assessment (A)"></textarea>
+            <textarea id="soapP" class="p-2 border rounded h-24" placeholder="Plan (P)"></textarea>
+          </div>
+          <div class="flex gap-2">
+            <button id="copySOAP" class="px-3 py-1 rounded bg-slate-800 text-white">Copy Note</button>
+            <button id="printSOAP" class="px-3 py-1 rounded bg-slate-600 text-white">Print</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="lg:col-span-1 card rounded shadow-sm p-3 space-y-3">
+      <div>
+        <h4 class="font-semibold">Actions</h4>
+        <div class="flex flex-col gap-2 mt-2">
+          <button id="msgBtn" class="p-2 rounded bg-slate-100">Send Message</button>
+        </div>
+      </div>
+      <div>
+        <h4 class="font-semibold">Filters</h4>
+        <div class="flex gap-2 mt-2">
+          <button id="filterHighRisk" class="px-2 py-1 rounded border text-sm">High Risk</button>
+          <button id="filterLowSpO2" class="px-2 py-1 rounded border text-sm">Low SpO₂</button>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <footer class="text-center text-xs text-slate-500 py-4">Demo • HealthAI Dashboard • Mock data only</footer>
+</div>
+
+<!-- Add Patient Modal -->
+<div id="addModal" class="fixed inset-0 hidden items-center justify-center modal-backdrop z-50">
+  <form id="addForm" class="bg-white rounded p-4 w-full max-w-md">
+    <h3 class="font-semibold mb-2">Add Patient</h3>
+    <div class="grid grid-cols-1 gap-2">
+      <input id="addName" required placeholder="Full name" class="p-2 border rounded" />
+      <div class="flex gap-2">
+        <input id="addAge" placeholder="Age" class="p-2 border rounded flex-1" />
+        <select id="addGender" class="p-2 border rounded w-32"><option>Female</option><option>Male</option><option>Other</option></select>
+      </div>
+      <textarea id="addNotes" placeholder="Notes / history" class="p-2 border rounded h-20"></textarea>
+      <div class="grid grid-cols-3 gap-2">
+        <input id="addHR" placeholder="HR" class="p-2 border rounded" />
+        <input id="addBP" placeholder="BP" class="p-2 border rounded" />
+        <input id="addSpO2" placeholder="SpO₂" class="p-2 border rounded" />
+      </div>
+    </div>
+    <div class="flex justify-end gap-2 mt-3">
+      <button type="button" id="addCancel" class="px-3 py-1 rounded border">Cancel</button>
+      <button type="submit" class="px-3 py-1 rounded bg-[color:var(--primary)] text-white">Add</button>
+    </div>
+  </form>
+</div>
+
+<!-- Patient Portal Modal -->
+<div id="portalModal" class="fixed inset-0 hidden items-center justify-center modal-backdrop z-50">
+  <div class="bg-white rounded p-4 w-full max-w-2xl max-h-[90vh] overflow-auto">
+    <h3 class="font-semibold mb-2">Patient Portal — Enter Symptoms</h3>
+    <form id="portalForm" class="space-y-3">
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
+        <input id="portalName" placeholder="Full name (optional)" class="p-2 border rounded" />
+        <input id="portalAge" placeholder="Age" class="p-2 border rounded" />
+        <select id="portalGender" class="p-2 border rounded"><option>Female</option><option>Male</option><option>Other</option></select>
+      </div>
+      <textarea id="portalSymptoms" placeholder="Describe your symptoms" class="p-2 border rounded h-28 w-full"></textarea>
+      <div class="grid grid-cols-3 gap-2">
+        <input id="portalHR" placeholder="HR (optional)" class="p-2 border rounded" />
+        <input id="portalBP" placeholder="BP (optional)" class="p-2 border rounded" />
+        <input id="portalSpO2" placeholder="SpO₂ (optional)" class="p-2 border rounded" />
+      </div>
+      <div class="flex justify-between items-center">
+        <div class="text-sm text-slate-500">Analysis runs locally (mock AI).</div>
+        <div class="flex gap-2">
+          <button type="button" id="portalClose" class="px-3 py-1 rounded border">Close</button>
+          <button type="submit" class="px-3 py-1 rounded bg-[color:var(--primary)] text-white">Analyze</button>
+        </div>
+      </div>
+    </form>
+
+    <div id="portalResult" class="mt-4 border-t pt-3 hidden">
+      <h4 class="font-semibold">AI Analysis</h4>
+      <div class="text-sm mt-2">
+        <div>Severity: <span id="portalSeverity" class="font-semibold text-emerald-600">Low</span></div>
+        <div class="mt-2">Flags: <span id="portalFlags">None</span></div>
+        <div class="mt-2">Advice:</div>
+        <ul id="portalAdvice" class="list-disc pl-5 mt-1 text-sm"></ul>
+
+        <div class="mt-3 flex gap-2">
+          <button id="portalCreate" class="px-3 py-1 rounded bg-emerald-600 text-white">Create Patient Record</button>
+          <button id="portalCopy" class="px-3 py-1 rounded border">Copy Advice</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Doctor Login Modal -->
+<div id="doctorLoginModal" class="fixed inset-0 hidden items-center justify-center modal-backdrop z-50">
+  <form id="doctorLoginForm" class="bg-white rounded p-4 w-full max-w-sm">
+    <h3 class="font-semibold mb-2">Doctor Login</h3>
+    <div class="text-sm text-slate-500 mb-2">Enter password to access doctor features.</div>
+    <input id="doctorPassword" type="password" placeholder="Password" class="p-2 border rounded w-full" />
+    <div class="flex justify-end gap-2 mt-3">
+      <button type="button" id="docLoginCancel" class="px-3 py-1 rounded border">Cancel</button>
+      <button type="submit" class="px-3 py-1 rounded bg-[color:var(--primary)] text-white">Login</button>
+    </div>
+  </form>
+</div>
+
+<!-- Doctors Modal -->
+<div id="doctorsModal" class="fixed inset-0 hidden items-center justify-center modal-backdrop z-50">
+  <div class="bg-white rounded p-4 w-full max-w-2xl max-h-[90vh] overflow-auto">
+    <div class="flex justify-between items-center mb-3">
+      <h3 class="font-semibold">Doctors</h3>
+      <div>
+        <button id="closeDoctors" class="px-3 py-1 rounded border">Close</button>
+      </div>
+    </div>
+    <div id="doctorsList" class="space-y-3"></div>
+
+    <div class="mt-4">
+      <h4 class="font-semibold">Assign doctor to selected patient</h4>
+      <div class="flex gap-2 mt-2">
+        <select id="assignDoctorSelect" class="p-2 border rounded"></select>
+        <button id="assignDoctorBtn" class="px-3 py-1 rounded bg-[color:var(--primary)] text-white">Assign</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Telemedicine Modal -->
+<div id="teleModal" class="fixed inset-0 hidden items-center justify-center modal-backdrop z-50">
+  <div class="bg-white rounded p-4 w-full max-w-3xl">
+    <div class="flex justify-between items-center mb-3">
+      <h3 class="font-semibold">Telemedicine</h3>
+      <button id="endCallBtn" class="px-3 py-1 rounded bg-red-600 text-white">End Call</button>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <div class="border rounded p-3">
+        <div class="text-sm text-slate-500 mb-2">Local Video</div>
+        <div class="bg-black rounded h-56 flex items-center justify-center overflow-hidden">
+          <video id="localVideo" autoplay muted playsinline style="width:100%; height:100%; object-fit:cover;"></video>
+          <div id="localPlaceholder" class="text-white hidden">No camera — simulated view</div>
+        </div>
+      </div>
+      <div class="border rounded p-3">
+        <div class="text-sm text-slate-500">Call Log</div>
+        <div id="callLog" class="mt-2 h-40 overflow-auto text-sm"></div>
+        <div class="mt-3 flex justify-between items-center">
+          <div id="callTimer" class="font-mono text-sm text-slate-600">00:00</div>
+          <div>
+            <button id="startCallBtn" class="px-3 py-1 rounded bg-emerald-600 text-white">Start Call</button>
+            <button id="toggleCamBtn" class="px-3 py-1 rounded border">Toggle Camera</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Message Modal -->
+<div id="messageModal" class="fixed inset-0 hidden items-center justify-center modal-backdrop z-50">
+  <form id="messageForm" class="bg-white rounded p-4 w-full max-w-md">
+    <h3 class="font-semibold mb-2">Send Message</h3>
+    <div class="grid grid-cols-1 gap-2">
+      <select id="messagePatientSelect" class="p-2 border rounded"><option value="">-- select patient --</option></select>
+      <input id="messageSubject" placeholder="Subject" class="p-2 border rounded" />
+      <textarea id="messageBody" placeholder="Message..." class="p-2 border rounded h-36"></textarea>
+    </div>
+    <div class="flex justify-end gap-2 mt-3">
+      <button type="button" id="msgCancel" class="px-3 py-1 rounded border">Cancel</button>
+      <button type="submit" class="px-3 py-1 rounded bg-[color:var(--primary)] text-white">Send</button>
+    </div>
+  </form>
+</div>
+
+<!-- AI Chat -->
+<div id="aiChatModal" class="fixed inset-0 hidden items-center justify-center modal-backdrop z-50">
+  <div class="bg-white rounded p-4 w-full max-w-lg max-h-[90vh] overflow-auto">
+    <div class="flex justify-between items-center mb-3">
+      <h3 class="font-semibold">AI Chat — Brief Report</h3>
+      <button id="closeAIChat" class="px-3 py-1 rounded border">Close</button>
+    </div>
+    <div id="aiChatStream" class="border rounded p-3 h-72 overflow-auto bg-slate-50"></div>
+    <div class="mt-3 flex gap-2">
+      <input id="aiChatInput" placeholder="Ask about this patient's report..." class="p-2 border rounded flex-1" />
+      <button id="aiChatSend" class="px-3 py-1 rounded bg-[color:var(--primary)] text-white">Ask</button>
+    </div>
+  </div>
+</div>
+
+<div id="toastArea"></div>
+
+<script>
+/* ---------------------------
+  Final fixed JS
+  - vitals chart works for new patients
+  - telemedicine start/stop works
+  - report generation works
+  - doctor assignment works and persists
+  - doctor login gating implemented
+----------------------------*/
+
+const STORAGE_KEY = 'healthai_final_v1';
+const DOCTOR_PASSWORD = 'doctor123';
+
+const DOCTORS = [
+  { id: 'D-100', name: 'Dr. Anil Sharma', speciality: 'Internal Medicine' },
+  { id: 'D-101', name: 'Dr. Meera Nair', speciality: 'Pulmonology' },
+  { id: 'D-102', name: 'Dr. Vikram Patel', speciality: 'Cardiology' }
+];
+
+const INITIAL_PATIENTS = [
+  {
+    id: "P-1001",
+    name: "Aisha Kapoor",
+    age: 46,
+    gender: "Female",
+    notes: "Type 2 diabetes. Hypertension. Recent mild dyspnea.",
+    vitals: [
+      { time: "08:00", hr: 82, bp: 130, spo2: 95, temp: 98.6 },
+      { time: "12:00", hr: 88, bp: 135, spo2: 93, temp: 98.8 },
+      { time: "16:00", hr: 96, bp: 142, spo2: 89, temp: 99.1 }
+    ],
+    labs: { crp: 5.6, wbc: 9.4 },
+    messages: [],
+    doctorId: 'D-100'
+  },
+  {
+    id: "P-1002",
+    name: "Rohit Menon",
+    age: 29,
+    gender: "Male",
+    notes: "Recovering from ankle sprain.",
+    vitals: [
+      { time: "09:00", hr: 74, bp: 122, spo2: 98, temp: 98.2 }
+    ],
+    labs: { crp: 0.8, wbc: 6.1 },
+    messages: [],
+    doctorId: null
+  }
+];
+
+let patients = [];
+let selectedPatient = null;
+let vitalsChart = null;
+let isDoctorLogged = false;
+let pendingDoctorAction = null;
+
+/* small helpers */
+function toast(msg, t = 2000) {
+  const el = document.createElement('div'); el.className = 'toast'; el.innerText = msg;
+  document.getElementById('toastArea').appendChild(el);
+  setTimeout(() => el.remove(), t);
+}
+function escapeHtml(s=''){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>'); }
+
+/* storage */
+function loadPatients(){
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    patients = raw ? JSON.parse(raw) : INITIAL_PATIENTS.map(p=>({...p}));
+  } catch(e) {
+    patients = INITIAL_PATIENTS.map(p=>({...p}));
+  }
+  document.getElementById('patientCount').innerText = patients.length;
+}
+function savePatients(){
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(patients));
+  document.getElementById('patientCount').innerText = patients.length;
+}
+
+/* render patients list and fill selects */
+function renderPatientList(filter=''){
+  const container = document.getElementById('patientsList'); container.innerHTML = '';
+  const q = (filter||'').toLowerCase();
+  const list = q ? patients.filter(p => p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q)) : patients;
+  if(list.length === 0){ container.innerHTML = '<div class="p-2 text-sm text-slate-600">No patients</div>'; return; }
+  list.forEach((p, i) => {
+    const btn = document.createElement('button');
+    btn.className = `w-full text-left p-2 rounded patient-item ${selectedPatient && selectedPatient.id === p.id ? 'bg-slate-50' : ''}`;
+    const hue = 160 + (i*18)%60;
+    btn.innerHTML = `
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div style="width:38px;height:38px;border-radius:8px;background:linear-gradient(135deg,hsl(${hue}deg 60% 45%), hsl(${hue+20}deg 55% 35%));display:flex;align-items:center;justify-content:center;color:white;font-weight:700">
+            ${p.name.split(' ').map(s=>s[0]).slice(0,2).join('').toUpperCase()}
+          </div>
+          <div>
+            <div class="font-semibold">${p.name}</div>
+            <div class="text-xs text-slate-500">${p.id} • ${p.age} • ${p.gender || ''}</div>
+          </div>
+        </div>
+        <div class="text-sm text-slate-600">SpO₂ ${p.vitals[p.vitals.length-1].spo2}%</div>
+      </div>
+    `;
+    btn.onclick = () => { selectedPatient = p; renderSelectedPatient(); renderPatientList(document.getElementById('searchInput').value); };
+    container.appendChild(btn);
+  });
+
+  // fill message patient select
+  const msgSel = document.getElementById('messagePatientSelect');
+  if(msgSel){
+    msgSel.innerHTML = '<option value="">-- select patient --</option>';
+    patients.forEach(p => { const o = document.createElement('option'); o.value = p.id; o.innerText = `${p.name} (${p.id})`; msgSel.appendChild(o); });
+  }
+
+  // fill assign doctor select if exists
+  const assignSel = document.getElementById('assignDoctorSelect');
+  if(assignSel){
+    assignSel.innerHTML = '<option value="">-- choose doctor --</option>';
+    DOCTORS.forEach(d => { const o = document.createElement('option'); o.value = d.id; o.innerText = `${d.name} (${d.speciality})`; assignSel.appendChild(o); });
+  }
+}
+
+/* selected patient view */
+function renderSelectedPatient(){
+  if(!selectedPatient){
+    document.getElementById('selName').innerText = 'Select a patient';
+    document.getElementById('selMeta').innerText = '';
+    document.getElementById('selDoctor').innerText = 'Unassigned';
+    ['selHR','selBP','selSpO2','selNotes','selLabs'].forEach(id => { const el = document.getElementById(id); if(el) el.innerText = '-'; });
+    document.getElementById('recentMessages').innerHTML = '';
+    destroyChart();
+    return;
+  }
+  document.getElementById('selName').innerText = selectedPatient.name;
+  document.getElementById('selMeta').innerText = `${selectedPatient.id} • ${selectedPatient.age} • ${selectedPatient.gender || ''}`;
+  const doc = DOCTORS.find(d => d.id === selectedPatient.doctorId);
+  document.getElementById('selDoctor').innerText = doc ? doc.name : 'Unassigned';
+  const latest = selectedPatient.vitals[selectedPatient.vitals.length - 1];
+  document.getElementById('selHR').innerText = latest.hr + ' bpm';
+  document.getElementById('selBP').innerText = latest.bp + ' mmHg';
+  document.getElementById('selSpO2').innerText = latest.spo2 + '%';
+  document.getElementById('selNotes').innerText = selectedPatient.notes || '-';
+  document.getElementById('selLabs').innerText = selectedPatient.labs ? `CRP ${selectedPatient.labs.crp} • WBC ${selectedPatient.labs.wbc}` : '-';
+  renderAlerts(selectedPatient);
+  renderChart(selectedPatient.vitals);
+  // messages
+  const rm = document.getElementById('recentMessages'); rm.innerHTML = '';
+  const msgs = (selectedPatient.messages || []).slice().reverse().slice(0,4);
+  if(msgs.length === 0) rm.innerHTML = '<div class="text-xs text-slate-500">No messages.</div>';
+  else msgs.forEach(m => {
+    const d = document.createElement('div');
+    d.innerHTML = `<div class="msg-bubble ${m.from === 'doctor' ? 'msg-doctor' : 'msg-patient'}"><div class="text-xs font-semibold">${m.subject || ''}</div><div class="text-sm">${m.body}</div><div class="text-xs text-slate-500 mt-1">${new Date(m.ts).toLocaleString()}</div></div>`;
+    rm.appendChild(d);
+  });
+}
+
+/* alerts */
+function renderAlerts(p){
+  const latest = p.vitals[p.vitals.length - 1];
+  const alerts = [];
+  if(latest.spo2 < 90) alerts.push({ level: 'critical', text: `Low SpO₂: ${latest.spo2}%` });
+  if(latest.hr > 100) alerts.push({ level: 'warning', text: `Tachycardia: HR ${latest.hr}` });
+  const box = document.getElementById('alertsBox') || (function(){ const el = document.createElement('div'); el.id='alertsBox'; document.querySelector('section')?.appendChild(el); return el; })();
+  box.innerHTML = '';
+  if(alerts.length === 0){ box.innerHTML = '<div class="p-3 text-sm text-slate-600">No active alerts.</div>'; return; }
+  alerts.forEach(a => {
+    const el = document.createElement('div');
+    el.className = `flex items-center gap-2 p-2 rounded-lg ${a.level === 'critical' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'}`;
+    el.innerHTML = `<span class="alert-badge ${a.level==='critical'?'bg-red-200 text-red-800':'bg-amber-200 text-amber-800'}">${a.level.toUpperCase()}</span><span class="text-sm">${a.text}</span>`;
+    box.appendChild(el);
+  });
+}
+
+/* chart (handles single datapoint) */
+function destroyChart(){ if(vitalsChart){ vitalsChart.destroy(); vitalsChart = null; } }
+function renderChart(vitals){
+  const ctx = document.getElementById('vitalsCanvas').getContext('2d');
+  destroyChart();
+  let times = vitals.map(v => v.time);
+  let hr = vitals.map(v => v.hr);
+  let bp = vitals.map(v => v.bp);
+  let spo2 = vitals.map(v => v.spo2);
+  if(vitals.length === 1){
+    times = [times[0], times[0] + ' '];
+    hr = [hr[0], Math.max(0, hr[0] - 1)];
+    bp = [bp[0], Math.max(0, bp[0] - 1)];
+    spo2 = [spo2[0], Math.max(0, spo2[0] - 1)];
+  }
+  const gradHR = ctx.createLinearGradient(0,0,0,240); gradHR.addColorStop(0,'rgba(2,6,23,0.9)'); gradHR.addColorStop(1,'rgba(2,6,23,0.06)');
+  const gradBP = ctx.createLinearGradient(0,0,0,240); gradBP.addColorStop(0,'rgba(6,182,212,0.9)'); gradBP.addColorStop(1,'rgba(6,182,212,0.06)');
+  const gradSp = ctx.createLinearGradient(0,0,0,240); gradSp.addColorStop(0,'rgba(16,185,129,0.9)'); gradSp.addColorStop(1,'rgba(16,185,129,0.06)');
+  vitalsChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: times,
+      datasets: [
+        { label:'HR', data: hr, borderColor:'#0f172a', backgroundColor:gradHR, tension:0.3, pointRadius:3, fill:false },
+        { label:'BP', data: bp, borderColor:'#06b6d4', backgroundColor:gradBP, tension:0.3, pointRadius:3, fill:false },
+        { label:'SpO₂', data: spo2, borderColor:'#10b981', backgroundColor:gradSp, tension:0.3, pointRadius:3, fill:false }
+      ]
+    },
+    options: {
+      responsive:true, maintainAspectRatio:false,
+      interaction:{ mode:'index', intersect:false },
+      scales:{ y:{ type:'linear' }, y1:{ type:'linear', position:'right', grid:{ drawOnChartArea:false } } },
+      plugins:{ legend:{ position:'bottom' } }
+    }
+  });
+}
+
+/* add patient logic */
+document.getElementById('openAddBtn').addEventListener('click', ()=> { document.getElementById('addModal').classList.remove('hidden'); document.getElementById('addModal').classList.add('flex'); });
+document.getElementById('addCancel').addEventListener('click', ()=> { document.getElementById('addModal').classList.add('hidden'); document.getElementById('addModal').classList.remove('flex'); });
+document.getElementById('addForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const name = document.getElementById('addName').value.trim(); if(!name) return alert('Enter name');
+  const p = {
+    id: `P-${Math.floor(1000 + Math.random()*9000)}`,
+    name,
+    age: parseInt(document.getElementById('addAge').value||0,10),
+    gender: document.getElementById('addGender').value,
+    notes: document.getElementById('addNotes').value || '',
+    vitals: [{ time: new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}), hr: Number(document.getElementById('addHR').value || 80), bp: Number(document.getElementById('addBP').value || 120), spo2: Number(document.getElementById('addSpO2').value || 98), temp: 98.6 }],
+    labs: { crp:0, wbc:0 },
+    messages: [],
+    doctorId: null
+  };
+  patients.unshift(p);
+  savePatients();
+  selectedPatient = p;
+  renderPatientList(document.getElementById('searchInput').value);
+  renderSelectedPatient();
+  document.getElementById('addModal').classList.add('hidden'); document.getElementById('addModal').classList.remove('flex');
+  toast('Patient added');
+});
+
+/* Patient Portal */
+document.getElementById('openPortalBtn').addEventListener('click', ()=> { document.getElementById('portalModal').classList.remove('hidden'); document.getElementById('portalModal').classList.add('flex'); });
+document.getElementById('portalClose').addEventListener('click', ()=> { document.getElementById('portalModal').classList.add('hidden'); document.getElementById('portalModal').classList.remove('flex'); document.getElementById('portalResult').classList.add('hidden'); });
+
+function analyzeSymptoms(text, spo2, hr){
+  const t = (text||'').toLowerCase(); let severity = 0; const flags = [];
+  if(/breath|breathless|dyspnea|shortness|sob|wheez/.test(t)){ severity=Math.max(severity,2); flags.push('Breathing difficulty'); }
+  if(/chest/.test(t)){ severity=Math.max(severity,2); flags.push('Chest pain'); }
+  if(/fever|temperature|feverish/.test(t)){ severity=Math.max(severity,1); flags.push('Fever'); }
+  if(/cough/.test(t)){ severity=Math.max(severity,1); flags.push('Cough'); }
+  if(Number(spo2) && Number(spo2) < 92){ severity=Math.max(severity,2); flags.push(`Low SpO₂ ${spo2}%`); }
+  if(Number(hr) && Number(hr) > 120){ severity=Math.max(severity,2); flags.push(`High HR ${hr}`); }
+  const advice = [];
+  if(severity === 2){ advice.push('Seek immediate medical attention.'); } else if(severity === 1){ advice.push('Schedule urgent clinic visit within 24 hours.'); } else { advice.push('Monitor and seek teleconsult if not improving.'); }
+  if(flags.includes('Fever')) advice.push('If fever >38°C or persistent >48 hrs, get evaluated.');
+  return { severity, flags, advice };
+}
+
+document.getElementById('portalForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const symptoms = document.getElementById('portalSymptoms').value || '';
+  const spo2 = document.getElementById('portalSpO2').value || '';
+  const hr = document.getElementById('portalHR').value || '';
+  const result = analyzeSymptoms(symptoms, spo2, hr);
+  document.getElementById('portalResult').classList.remove('hidden');
+  document.getElementById('portalSeverity').innerText = result.severity === 2 ? 'High' : result.severity === 1 ? 'Moderate' : 'Low';
+  document.getElementById('portalFlags').innerText = result.flags.length ? result.flags.join(', ') : 'None';
+  const adviceList = document.getElementById('portalAdvice'); adviceList.innerHTML = '';
+  result.advice.forEach(a => { const li = document.createElement('li'); li.innerText = a; adviceList.appendChild(li); });
+  document.getElementById('portalModal').dataset.lastAnalysis = JSON.stringify(result);
+});
+
+document.getElementById('portalCreate').addEventListener('click', () => {
+  const p = {
+    id: `P-${Math.floor(1000 + Math.random()*9000)}`,
+    name: document.getElementById('portalName').value || `Portal-${Date.now()}`,
+    age: parseInt(document.getElementById('portalAge').value || 0, 10),
+    gender: document.getElementById('portalGender').value,
+    notes: document.getElementById('portalSymptoms').value || '',
+    vitals: [{ time: new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}), hr: Number(document.getElementById('portalHR').value || 80), bp: Number(document.getElementById('portalBP').value || 120), spo2: Number(document.getElementById('portalSpO2').value || 98), temp: 98.6 }],
+    labs: { crp:0, wbc:0 },
+    messages: [],
+    doctorId: null
+  };
+  patients.unshift(p);
+  savePatients();
+  selectedPatient = p;
+  renderPatientList(document.getElementById('searchInput').value);
+  renderSelectedPatient();
+  document.getElementById('portalModal').classList.add('hidden'); document.getElementById('portalModal').classList.remove('flex');
+  toast('Patient created');
+});
+
+/* doctor login modal */
+document.getElementById('doctorLoginBtn').addEventListener('click', ()=> { document.getElementById('doctorLoginModal').classList.remove('hidden'); document.getElementById('doctorLoginModal').classList.add('flex'); });
+document.getElementById('docLoginCancel').addEventListener('click', ()=> { document.getElementById('doctorLoginModal').classList.add('hidden'); document.getElementById('doctorLoginModal').classList.remove('flex'); pendingDoctorAction = null; });
+
+document.getElementById('doctorLoginForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const pw = document.getElementById('doctorPassword').value || '';
+  if(pw === DOCTOR_PASSWORD){
+    isDoctorLogged = true;
+    document.getElementById('roleLabel').innerText = 'Doctor';
+    document.getElementById('doctorLoginModal').classList.add('hidden'); document.getElementById('doctorLoginModal').classList.remove('flex');
+    toast('Doctor login successful');
+    if(pendingDoctorAction){ const act = pendingDoctorAction; pendingDoctorAction = null; setTimeout(act, 150); }
+  } else {
+    alert('Incorrect password');
+  }
+});
+
+function requireDoctorThenRun(action){
+  if(isDoctorLogged){ action(); return; }
+  pendingDoctorAction = action;
+  document.getElementById('doctorLoginModal').classList.remove('hidden'); document.getElementById('doctorLoginModal').classList.add('flex');
+}
+
+/* Doctors modal & assignment (FIXED wiring) */
+document.getElementById('doctorsTabBtn').addEventListener('click', ()=> {
+  document.getElementById('doctorsModal').classList.remove('hidden'); document.getElementById('doctorsModal').classList.add('flex');
+  renderDoctorsList();
+  populateAssignSelect();
+});
+document.getElementById('closeDoctors').addEventListener('click', ()=> {
+  document.getElementById('doctorsModal').classList.add('hidden'); document.getElementById('doctorsModal').classList.remove('flex');
+});
+
+function renderDoctorsList(){
+  const el = document.getElementById('doctorsList'); el.innerHTML = '';
+  DOCTORS.forEach(d => {
+    const c = document.createElement('div'); c.className = 'p-3 border rounded flex items-center justify-between';
+    const assigned = patients.filter(p => p.doctorId === d.id).length;
+    c.innerHTML = `<div><div class="font-semibold">${d.name}</div><div class="text-xs text-slate-500">${d.speciality}</div></div><div class="text-sm text-slate-600">${assigned} patient(s)</div>`;
+    el.appendChild(c);
+  });
+}
+function populateAssignSelect(){
+  const sel = document.getElementById('assignDoctorSelect'); sel.innerHTML = '<option value="">-- choose doctor --</option>';
+  DOCTORS.forEach(d => { const o = document.createElement('option'); o.value = d.id; o.innerText = `${d.name} (${d.speciality})`; sel.appendChild(o); });
+}
+document.getElementById('assignDoctorBtn').addEventListener('click', ()=> {
+  if(!selectedPatient) return alert('Select a patient first');
+  const did = document.getElementById('assignDoctorSelect').value || null;
+  selectedPatient.doctorId = did;
+  savePatients();
+  renderSelectedPatient();
+  renderPatientList(document.getElementById('searchInput').value);
+  renderDoctorsList();
+  toast('Doctor assigned to patient');
+});
+
+/* Telemedicine (start/stop) */
+let localStream = null, callTimer = null, callStart = null;
+function openTele(){
+  if(!selectedPatient) return alert('Select a patient');
+  requireDoctorThenRun(()=> {
+    document.getElementById('teleModal').classList.remove('hidden'); document.getElementById('teleModal').classList.add('flex');
+    document.getElementById('callLog').innerHTML = '';
+    document.getElementById('callTimer').innerText = '00:00';
+    tryStartCamera();
+  });
+}
+document.getElementById('openTeleBtn').addEventListener('click', openTele);
+document.getElementById('startCallBtn').addEventListener('click', startCall);
+document.getElementById('toggleCamBtn').addEventListener('click', toggleCamera);
+document.getElementById('endCallBtn').addEventListener('click', ()=> { endCall(); document.getElementById('teleModal').classList.add('hidden'); document.getElementById('teleModal').classList.remove('flex'); });
+
+async function tryStartCamera(){
+  try {
+    localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+    document.getElementById('localVideo').srcObject = localStream;
+    document.getElementById('localPlaceholder').classList.add('hidden');
+  } catch(e){
+    document.getElementById('localPlaceholder').classList.remove('hidden');
+    localStream = null;
+  }
+}
+function toggleCamera(){
+  if(localStream){ localStream.getTracks().forEach(t => t.stop()); localStream = null; document.getElementById('localVideo').srcObject = null; document.getElementById('localPlaceholder').classList.remove('hidden'); }
+  else tryStartCamera();
+}
+function startCall(){
+  if(!selectedPatient) return alert('Select a patient');
+  addCallLog('Call started');
+  startTimer();
+  selectedPatient.messages = selectedPatient.messages || [];
+  selectedPatient.messages.push({ from: 'clinic', subject: 'Teleconsult started', body: `Teleconsult started at ${new Date().toLocaleString()}`, ts: Date.now() });
+  savePatients(); renderSelectedPatient();
+}
+function endCall(){
+  addCallLog('Call ended');
+  stopTimer();
+  selectedPatient.messages = selectedPatient.messages || [];
+  selectedPatient.messages.push({ from: 'clinic', subject: 'Teleconsult ended', body: `Teleconsult ended at ${new Date().toLocaleString()}`, ts: Date.now() });
+  savePatients(); renderSelectedPatient();
+  if(localStream){ localStream.getTracks().forEach(t => t.stop()); localStream = null; document.getElementById('localVideo').srcObject = null; }
+}
+function addCallLog(txt){ const el = document.createElement('div'); el.className = 'text-sm text-slate-700'; el.innerText = `${new Date().toLocaleTimeString()} — ${txt}`; document.getElementById('callLog').prepend(el); }
+function startTimer(){ callStart = Date.now(); callTimer = setInterval(()=>{ document.getElementById('callTimer').innerText = formatDuration(Date.now() - callStart); }, 1000); }
+function stopTimer(){ if(callTimer) clearInterval(callTimer); callTimer = null; document.getElementById('callTimer').innerText = '00:00'; }
+function formatDuration(ms){ const s = Math.floor(ms/1000); const mm = String(Math.floor(s/60)).padStart(2,'0'); const ss = String(s%60).padStart(2,'0'); return `${mm}:${ss}`; }
+
+/* AI co-pilot summary (doctor-gated) */
+document.getElementById('genAISummary').addEventListener('click', ()=> {
+  requireDoctorThenRun(()=> {
+    if(!selectedPatient) return alert('Select a patient');
+    const latest = selectedPatient.vitals[selectedPatient.vitals.length - 1];
+    const s = `Patient ${selectedPatient.name} (${selectedPatient.id}), ${selectedPatient.age}yo. Latest vitals: HR ${latest.hr}, SpO₂ ${latest.spo2}%. Key note: ${selectedPatient.notes.split('.').slice(0,1).join('.')}.`;
+    document.getElementById('aiSummaryText').innerText = s;
+  });
+});
+
+/* Generate report (doctor-gated) */
+function generateReport(){
+  if(!selectedPatient) return alert('Select a patient');
+  const p = selectedPatient;
+  const latest = p.vitals[p.vitals.length - 1];
+  const ai = document.getElementById('aiSummaryText').innerText || '';
+  const soap = { s: document.getElementById('soapS').value, o: document.getElementById('soapO').value, a: document.getElementById('soapA').value, p: document.getElementById('soapP').value };
+  const msgs = (p.messages||[]).slice().reverse().slice(0,5);
+  const docName = (DOCTORS.find(d => d.id === p.doctorId) || {}).name || 'Unassigned';
+  const html = `
+    <!doctype html><html><head><meta charset="utf-8"><title>Report - ${escapeHtml(p.name)}</title>
+    <style>body{font-family:Arial,Helvetica,sans-serif;padding:20px;color:#0f172a} .header{background:linear-gradient(90deg,#0ea5a3,#0f766e);color:#fff;padding:16px;border-radius:6px} table{width:100%;border-collapse:collapse;margin-top:10px} table th,table td{border:1px solid #e8f0f0;padding:8px;text-align:left}</style></head><body>
+    <div class="header"><h2>HealthAI Report</h2></div><h3>${escapeHtml(p.name)} — ${escapeHtml(p.id)}</h3>
+    <div><strong>Doctor:</strong> ${escapeHtml(docName)}</div>
+    <h4>Vitals</h4><table><thead><tr><th>Time</th><th>HR</th><th>BP</th><th>SpO₂</th><th>Temp</th></tr></thead><tbody>
+    ${p.vitals.map(v => `<tr><td>${escapeHtml(v.time)}</td><td>${v.hr}</td><td>${v.bp}</td><td>${v.spo2}</td><td>${v.temp}</td></tr>`).join('')}
+    </tbody></table>
+    <h4>AI Summary</h4><div>${escapeHtml(ai)}</div>
+    <h4>SOAP</h4><div><strong>S:</strong> ${escapeHtml(soap.s||'')}<br/><strong>O:</strong> ${escapeHtml(soap.o||'')}<br/><strong>A:</strong> ${escapeHtml(soap.a||'')}<br/><strong>P:</strong> ${escapeHtml(soap.p||'')}</div>
+    <h4>Messages</h4><ul>${msgs.map(m=>`<li><strong>${escapeHtml(m.subject||m.from)}</strong> — ${escapeHtml(m.body)} <em>(${new Date(m.ts).toLocaleString()})</em></li>`).join('')}</ul>
+    </body></html>`;
+  const w = window.open('', '_blank', 'noopener');
+  if(!w){ alert('Popup blocked — allow popups and retry'); return; }
+  w.document.open(); w.document.write(html); w.document.close();
+  // auto print after short delay
+  setTimeout(()=>{ try{ w.focus(); w.print(); } catch(e){ console.warn('Print failed', e); } }, 400);
+}
+document.getElementById('generateReportBtn').addEventListener('click', ()=> requireDoctorThenRun(generateReport));
+
+/* Messages (doctor-gated) */
+document.getElementById('msgBtn').addEventListener('click', ()=> requireDoctorThenRun(()=> { document.getElementById('messageModal').classList.remove('hidden'); document.getElementById('messageModal').classList.add('flex'); }));
+document.getElementById('msgCancel').addEventListener('click', ()=> { document.getElementById('messageModal').classList.add('hidden'); document.getElementById('messageModal').classList.remove('flex'); });
+document.getElementById('messageForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const pid = document.getElementById('messagePatientSelect').value; if(!pid) return alert('Select patient');
+  const subj = document.getElementById('messageSubject').value || 'Message';
+  const body = document.getElementById('messageBody').value || '';
+  const p = patients.find(x => x.id === pid);
+  p.messages = p.messages || []; p.messages.push({ from: 'doctor', subject: subj, body, ts: Date.now() });
+  savePatients(); if(selectedPatient && selectedPatient.id === pid) renderSelectedPatient();
+  document.getElementById('messageModal').classList.add('hidden'); document.getElementById('messageModal').classList.remove('flex');
+  toast('Message sent');
+});
+
+/* AI Chat (open) */
+document.getElementById('openAIChatBtn').addEventListener('click', ()=> {
+  if(!selectedPatient) return alert('Select a patient');
+  document.getElementById('aiChatModal').classList.remove('hidden'); document.getElementById('aiChatModal').classList.add('flex');
+  document.getElementById('aiChatStream').innerHTML = '';
+});
+document.getElementById('closeAIChat').addEventListener('click', ()=> { document.getElementById('aiChatModal').classList.add('hidden'); document.getElementById('aiChatModal').classList.remove('flex'); });
+document.getElementById('aiChatSend').addEventListener('click', ()=> {
+  const q = document.getElementById('aiChatInput').value.trim(); if(!q) return;
+  const stream = document.getElementById('aiChatStream'); const u = document.createElement('div'); u.innerHTML = `<div style="text-align:right"><strong>You:</strong> ${escapeHtml(q)}</div>`; stream.appendChild(u); stream.scrollTop = stream.scrollHeight;
+  const reply = aiMockReply(q, selectedPatient);
+  setTimeout(()=>{ const b = document.createElement('div'); b.innerHTML = `<div><strong>AI:</strong> ${escapeHtml(reply)}</div>`; stream.appendChild(b); stream.scrollTop = stream.scrollHeight; }, 300);
+  document.getElementById('aiChatInput').value = '';
+});
+function aiMockReply(q, p){
+  if(!p) return 'No patient selected.';
+  const t = q.toLowerCase();
+  const latest = p.vitals[p.vitals.length - 1];
+  if(t.includes('brief') || t.includes('summary')) return `Brief: ${p.name} (${p.id}), ${p.age}yo. Latest HR ${latest.hr}, SpO₂ ${latest.spo2}%. Note: ${p.notes.split('.').slice(0,1).join('.')}.`;
+  if(t.includes('recommend')){ if(latest.spo2 < 90) return 'Recommend urgent review and consider supplemental oxygen.'; return 'Recommend monitoring vitals and follow-up in 24-48 hrs if no improvement.'; }
+  return 'I can give a brief summary or recommendations. Try: "Give brief summary" or "What do you recommend?"';
+}
+
+/* SOAP actions */
+document.getElementById('autofillSOAP').addEventListener('click', ()=> {
+  if(!selectedPatient) return alert('Select a patient');
+  const latest = selectedPatient.vitals[selectedPatient.vitals.length - 1];
+  document.getElementById('soapS').value = `Patient reports: ${selectedPatient.notes}`;
+  document.getElementById('soapO').value = `HR ${latest.hr}, BP ${latest.bp}, SpO₂ ${latest.spo2}%`;
+  document.getElementById('soapA').value = `Possible infection/exacerbation. Hypoxemia noted (SpO₂ ${latest.spo2}).`;
+  document.getElementById('soapP').value = `Monitor SpO₂, consider oxygen if <90%, repeat labs.`;
+});
+document.getElementById('copySOAP').addEventListener('click', ()=> {
+  const text = `S:${document.getElementById('soapS').value}\nO:${document.getElementById('soapO').value}\nA:${document.getElementById('soapA').value}\nP:${document.getElementById('soapP').value}`;
+  navigator.clipboard.writeText(text); toast('SOAP copied');
+});
+document.getElementById('printSOAP').addEventListener('click', () => window.print());
+
+/* search, reset, filters */
+document.getElementById('searchInput').addEventListener('input', (e) => renderPatientList(e.target.value));
+document.getElementById('clearSearch').addEventListener('click', ()=> { document.getElementById('searchInput').value=''; renderPatientList(); });
+document.getElementById('resetBtn').addEventListener('click', ()=> { if(!confirm('Reset demo data?')) return; localStorage.removeItem(STORAGE_KEY); loadPatients(); selectedPatient = patients[0] || null; renderPatientList(); renderSelectedPatient(); toast('Reset'); });
+document.getElementById('filterLowSpO2').addEventListener('click', ()=> { const p = patients.find(x => x.vitals[x.vitals.length-1].spo2 < 90); if(p){ selectedPatient = p; renderSelectedPatient(); renderPatientList(); } else alert('No low SpO₂ patients'); });
+
+/* init */
+loadPatients(); selectedPatient = patients[0] || null; renderPatientList(); renderSelectedPatient();
+
+</script>
+</body>
+</html>
